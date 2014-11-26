@@ -69,11 +69,213 @@ const int BUY_COST = 20;
 
 int plat_src[MAX_ZONE_COUNT];
 vector<int> zone_link[MAX_ZONE_COUNT];
+
+const int NEAUTRAL = -1;
+const int inf = ten(8);
+
+int zone_count;
+
+int zone_dist[MAX_ZONE_COUNT][MAX_ZONE_COUNT];
+
+struct Move
+{
+    int from, to;
+    Move() : from(-1){}
+    Move(int from, int to)
+        : from(from), to(to)
+    {
+    }
+
+    string to_s() const
+    {
+        char buf[256];
+        sprintf(buf, "1 %d %d", from, to);
+        return buf;
+    }
+
+    string to_p() const
+    {
+        char buf[256];
+        sprintf(buf, "%2d -> %2d", from, to);
+        return buf;
+    }
+};
+int count_sum_src(int id, const vector<int>& owner)
+{
+    int sum = 0;
+    rep(i, zone_count)
+        if (owner[i] == id)
+            sum += plat_src[i];
+    return sum;
+}
+vector<Move> search_moves(const int id, const vector<int>& start_pod_pos, const vector<int>& start_owner, const int search_turns)
+{
+    const int num_pods = start_pod_pos.size();
+
+    vector<int> pos_score(zone_count);
+    rep(pos, zone_count)
+    {
+        if (start_owner[pos] != id)
+        {
+            int base_score = (plat_src[pos] + 1) * (plat_src[pos] + 1);
+            base_score *= ten(4);
+
+            rep(to, zone_count)
+            {
+                int d = (1 + zone_dist[pos][to]);
+                pos_score[to] += base_score / (d * d);
+            }
+        }
+    }
+
+    struct State
+    {
+        vector<int> pod_pos;
+        vector<int> owner;
+
+        int gain_plat;
+        int gain_pos_score;
+
+        int prev_beam_i;
+        Move move;
+
+        bool operator<(const State& other) const
+        {
+            return score() > other.score();
+        }
+
+    private:
+        tuple<int, int> score() const
+        {
+            return make_tuple(gain_plat, gain_pos_score);
+        }
+    };
+
+    const int beam_width = 2;
+
+    vector<vector<int>> prev;
+    vector<vector<Move>> moves;
+
+    vector<State> cur_beam;
+    priority_queue<State> next_beam;
+
+    State start_state;
+    start_state.pod_pos = start_pod_pos;
+    start_state.owner = start_owner;
+    start_state.gain_plat = 0;
+    start_state.gain_pos_score = 0;
+    start_state.prev_beam_i = -ten(9);
+    cur_beam.push_back(start_state);
+    rep(turn, search_turns) rep(pod_i, num_pods)
+    {
+        const int ite_i = turn * num_pods + pod_i;
+        assert(!cur_beam.empty());
+
+        rep(cur_beam_i, cur_beam.size())
+        {
+            const State& cur = cur_beam[cur_beam_i];
+
+            for (int to : zone_link[cur.pod_pos[pod_i]])
+            {
+                State next = cur;
+                next.pod_pos[pod_i] = to;
+                next.prev_beam_i = cur_beam_i;
+                if (turn == 0) // tuning
+                    next.move = Move(cur.pod_pos[pod_i], to);
+
+                if (cur.owner[to] != id)
+                {
+                    next.owner[to] = id;
+                    next.gain_pos_score += pos_score[to];
+                }
+
+                if (pod_i == num_pods - 1)
+                    next.gain_plat += count_sum_src(id, next.owner);
+
+                if (next_beam.size() == beam_width)
+                {
+                    // better score?
+                    if (next < next_beam.top())
+                    {
+                        next_beam.pop();
+                        next_beam.push(next);
+                    }
+                }
+                else
+                    next_beam.push(next);
+            }
+        }
+        assert(!next_beam.empty());
+
+        cur_beam.clear();
+        while (!next_beam.empty())
+        {
+            cur_beam.push_back(next_beam.top());
+            next_beam.pop();
+        }
+
+        moves.push_back(vector<Move>(cur_beam.size()));
+        prev.push_back(vector<int>(cur_beam.size()));
+        rep(i, cur_beam.size())
+        {
+            prev[ite_i][i] = cur_beam[i].prev_beam_i;
+            if (turn == 0)
+            {
+                assert(cur_beam[i].move.from != -1);
+                moves[ite_i][i] = cur_beam[i].move;
+            }
+        }
+    }
+
+    vector<Move> res(num_pods);
+    int best_beam_i = (int)cur_beam.size() - 1; // because priority_queue order
+    for (int ite_i = (int)prev.size() - 1, beam_i = best_beam_i; ite_i >= 0; --ite_i)
+    {
+        if (ite_i < num_pods)
+        {
+            res[ite_i] = moves[ite_i][beam_i];
+            assert(res[ite_i].from != -1);
+        }
+        beam_i = prev[ite_i][beam_i];
+    }
+    return res;
+}
+
+void test()
+{
+    zone_count = 4;
+    vector<pint> e = {
+        pint(0, 1),
+        pint(1, 2),
+        pint(2, 3),
+    };
+    for (auto& it : e)
+    {
+        int u = it.first;
+        int v = it.second;
+        zone_link[u].push_back(v);
+        zone_link[v].push_back(u);
+    }
+
+    int id = 0;
+
+    vector<int> owner(zone_count, NEAUTRAL);
+    vector<int> pos = { 1, 1 };
+    for (int i : pos)
+        owner[i] = id;
+
+    auto moves = search_moves(id, pos, owner, 10);
+    for (auto& it : moves)
+        dump(it.to_p());
+}
+
 int main()
 {
+    test();
+    return 0;
     int player_count; // the amount of players (2 to 4)
     int my_id; // my player ID (0, 1, 2 or 3)
-    int zone_count; // the amount of zones on the map
+//     int zone_count; // the amount of zones on the map
     int linkCount; // the amount of links between all zones
     cin >> player_count >> my_id >> zone_count >> linkCount; cin.ignore();
     for (int i = 0; i < zone_count; i++) {
@@ -90,13 +292,35 @@ int main()
         zone_link[zone2].push_back(zone1);
     }
 
+    rep(start, zone_count)
+    {
+        rep(i, zone_count)
+            zone_dist[start][i] = inf;
+        zone_dist[start][start] = 0;
+        queue<int> q;
+        while (!q.empty())
+        {
+            int pos = q.front();
+            q.pop();
+
+            for (int to : zone_link[pos])
+            {
+                if (zone_dist[start][to] == inf)
+                {
+                    zone_dist[start][to] = zone_dist[start][pos] + 1;
+                    q.push(to);
+                }
+            }
+        }
+    }
+
     // game loop
     rep(turn, 1919810)
     {
         int platinum; // my available Platinum
         cin >> platinum; cin.ignore();
 
-        vector<int> owner(zone_count, 114514);
+        vector<int> owner(zone_count, NEAUTRAL);
         vector<vector<int>> pods(zone_count, vector<int>(4));
         for (int i = 0; i < zone_count; i++) {
             int zId; // this zone's ID
@@ -118,12 +342,11 @@ int main()
         // To debug: cerr << "Debug messages..." << endl;
 
 
-
         vector<vector<int>> next_pods(zone_count, vector<int>(4));
         {
 //             cout << "WAIT" << endl; // first line for movement commands, second line for POD purchase (see the protocol in the statement for details)
 
-            vector<tuple<int, int, int>> move_commands;
+            vector<Move> move_commands;
             rep(i, zone_count)
             {
                 rep(_, pods[i][my_id])
@@ -145,13 +368,13 @@ int main()
                         else
                         {
                             ++next_pods[zone_link[i][k]][my_id];
-                            move_commands.emplace_back(1, i, zone_link[i][k]);
+                            move_commands.push_back(Move(i, zone_link[i][k]));
                         }
                     }
                     else
                     {
                         ++next_pods[next][my_id];
-                        move_commands.emplace_back(1, i, next);
+                        move_commands.push_back(Move(i, next));
                     }
                 }
             }
@@ -162,9 +385,7 @@ int main()
             {
                 for (auto& it : move_commands)
                 {
-                    int a, b, c;
-                    tie(a, b, c) = it;
-                    cout << a << " " << b << " " << c << " ";
+                    cout << it.to_s() << " ";
                 }
                 cout << endl;
             }
