@@ -159,7 +159,7 @@ vector<Move> search_moves(const int id, const vector<int>& start_pod_pos, const 
         }
     };
 
-    const int beam_width = 10;
+    const int beam_width = 30;
 
     vector<vector<int>> prev;
     vector<vector<Move>> moves;
@@ -402,16 +402,16 @@ int main()
             const auto next_pods = pods;
             const auto is_all_own = all_own(my_id, owner);
 
-            vector<pint> cand_pos;
+            vector<tuple<int, int, int>> cand_pos;
             rep(i, zone_count)
             {
                 if (!is_all_own[i])
                 {
                     if (owner[i] == NEAUTRAL)
                     {
-                        cand_pos.push_back(pint(plat_src[i], i));
+                        cand_pos.push_back(make_tuple(plat_src[i], i, turn == 0 ? 2 : 1));
                         if (next_pods[i][my_id] > 0)
-                            cand_pos.back().first -= 3;
+                            get<0>(cand_pos.back()) -= 3;
                     }
                     else if (owner[i] == my_id)
                     {
@@ -422,16 +422,22 @@ int main()
                         if (around_ene > 0)
                         {
                             int need = around_ene;
-                            rep(_, need)
-                                cand_pos.push_back(pint(plat_src[i], i));
+                            cand_pos.push_back(make_tuple(plat_src[i], i, need));
                         }
                     }
                 }
             }
             sort(rall(cand_pos));
             vector<pint> buy_commands;
-            rep(i, min<int>(cand_pos.size(), platinum / BUY_COST)) rep(_, 2)
-                buy_commands.push_back(pint(1, cand_pos[i].second));
+            int rem = platinum;
+            for (auto& it : cand_pos)
+            {
+                if (rem == 0)
+                    break;
+                int num = min(rem, get<2>(it));
+                buy_commands.push_back(pint(num, get<1>(it)));
+                rem -= num;
+            }
 
 //             srand(my_id * 1919810);
 //             vector<pint> buy_commands;
@@ -456,3 +462,4 @@ int main()
         }
     }
 }
+
