@@ -62,6 +62,34 @@ typedef long long ll;
 typedef pair<int, int> pint;
 
 
+#ifdef _MSC_VER
+#include <Windows.h>
+#else
+#include <sys/time.h>
+#endif
+class Timer
+{
+    typedef double time_type;
+    typedef unsigned int skip_type;
+
+private:
+    time_type start_time;
+    time_type elapsed;
+
+#ifdef _MSC_VER
+    time_type get_ms() { return (time_type)GetTickCount64() / 1000; }
+#else
+    time_type get_ms() { struct timeval t; gettimeofday(&t, NULL); return (time_type)t.tv_sec * 1000 + (time_type)t.tv_usec / 1000; }
+#endif
+
+public:
+    Timer() {}
+
+    void start() { start_time = get_ms(); }
+    time_type get_elapsed() { return elapsed = get_ms() - start_time; }
+};
+
+
 
 
 const int MAX_ZONE_COUNT = 256;
@@ -76,6 +104,9 @@ const int inf = ten(8);
 int zone_count;
 
 int zone_dist[MAX_ZONE_COUNT][MAX_ZONE_COUNT];
+
+struct Land;
+vector<Land> lands;
 
 struct Move
 {
@@ -100,15 +131,78 @@ struct Move
         return buf;
     }
 };
-int count_sum_src(int id, const vector<int>& owner)
+
+struct Land
 {
-    int sum = 0;
-    rep(i, zone_count)
-        if (owner[i] == id)
-            sum += plat_src[i];
-    return sum;
+    vector<int> pos;
+
+    bool perfect(int id, const vector<int>& owner)
+    {
+        for (int i : pos)
+            if (owner[i] != id)
+                return false;
+        return true;
+    }
+
+    vector<int> can_buy_pos(int id, const vector<int>& owner)
+    {
+        vector<int> p;
+        for (int i : pos)
+            if (owner[i] == id || owner[i] == NEAUTRAL)
+                p.push_back(i);
+        return p;
+    }
+
+    vector<int> list_pods_pos(int id, const vector<vector<int>>& pods)
+    {
+        vector<int> p;
+        for (int i : pos)
+        {
+            rep(j, pods[i][id])
+                p.push_back(i);
+        }
+        return p;
+    }
+};
+vector<Land> list_lands()
+{
+    vector<Land> lands;
+    vector<bool> visit(zone_count);
+    rep(s, zone_count)
+    {
+        if (!visit[s])
+        {
+            vector<int> ps;
+
+            queue<int> q;
+            q.push(s);
+            visit[s] = true;
+            while (!q.empty())
+            {
+                int p = q.front();
+                q.pop();
+
+                ps.push_back(p);
+
+                for (int to : zone_link[p])
+                {
+                    if (!visit[to])
+                    {
+                        q.push(to);
+                        visit[to] = true;
+                    }
+                }
+            }
+
+            Land land;
+            land.pos = ps;
+            lands.push_back(land);
+        }
+    }
+    return lands;
 }
-vector<Move> search_moves(const int id, const vector<int>& start_pod_pos, const vector<int>& start_owner, const int search_turns)
+
+vector<Move> search_moves(const int id, const vector<int>& start_pod_pos, const vector<int>& start_owner, const int search_turns, const int beam_width)
 {
     const int num_pods = start_pod_pos.size();
     if (num_pods == 0)
@@ -129,16 +223,24 @@ vector<Move> search_moves(const int id, const vector<int>& start_pod_pos, const 
             }
         }
     }
-    rep(i, zone_count)
-    {
+
+
+//     rep(i, zone_count)
+//     {
 //         fprintf(stderr, "%3d (%2d): %5d %5d\n", i, start_owner[i], plat_src[i], pos_score[i]);
 //         fprintf(stderr, "%3d -> %3d: %5d\n", start_pod_pos[0], i, zone_dist[start_pod_pos[0]][i]);
-    }
+//     }
+
+    typedef bitset<MAX_ZONE_COUNT> Own;
+    Own start_own;
+    rep(i, zone_count)
+        start_own[i] = start_owner[i] == id;
 
     struct State
     {
         vector<int> pod_pos;
-        vector<int> owner;
+//         vector<int> owner;
+        Own own;
 
         int gain_plat;
         int sum_gain_plat;
@@ -159,8 +261,6 @@ vector<Move> search_moves(const int id, const vector<int>& start_pod_pos, const 
         }
     };
 
-    const int beam_width = 30;
-
     vector<vector<int>> prev;
     vector<vector<Move>> moves;
 
@@ -169,7 +269,8 @@ vector<Move> search_moves(const int id, const vector<int>& start_pod_pos, const 
 
     State start_state;
     start_state.pod_pos = start_pod_pos;
-    start_state.owner = start_owner;
+//     start_state.owner = start_owner;
+    start_state.own = start_own;
     start_state.gain_plat = 0;
     start_state.sum_gain_plat = 0;
     start_state.gain_pos_score = 0;
@@ -196,9 +297,11 @@ vector<Move> search_moves(const int id, const vector<int>& start_pod_pos, const 
                 if (turn == 0) // tuning
                     next.move = Move(cur.pod_pos[pod_i], to);
 
-                if (cur.owner[to] != id)
+//                 if (cur.owner[to] != id)
+                if (!cur.own[to])
                 {
-                    next.owner[to] = id;
+//                     next.owner[to] = id;
+                    next.own[to] = true;
                     next.gain_plat += plat_src[to];
                     next.gain_pos_score += pos_score[to];
                 }
@@ -255,37 +358,6 @@ vector<Move> search_moves(const int id, const vector<int>& start_pod_pos, const 
         beam_i = prev[ite_i][beam_i];
     }
     return res;
-}
-
-void test()
-{
-    zone_count = 5;
-    vector<pint> e = {
-        pint(0, 1),
-        pint(1, 2),
-        pint(2, 3),
-        pint(3, 4),
-    };
-    for (auto& it : e)
-    {
-        int u = it.first;
-        int v = it.second;
-        zone_link[u].push_back(v);
-        zone_link[v].push_back(u);
-    }
-
-    int id = 0;
-
-    plat_src[0] = plat_src[4] = 6;
-
-    vector<int> owner(zone_count, NEAUTRAL);
-    vector<int> pos = { 1, 3 };
-    for (int i : pos)
-        owner[i] = id;
-
-    auto moves = search_moves(id, pos, owner, 1);
-    for (auto& it : moves)
-        dump(it.to_p());
 }
 
 vector<bool> all_own(int id, const vector<int>& own)
@@ -352,6 +424,7 @@ int main()
         }
     }
 
+    ::lands = list_lands();
 
     // game loop
     rep(turn, 1919810)
@@ -381,11 +454,63 @@ int main()
         // To debug: cerr << "Debug messages..." << endl;
 
 
-        vector<int> pod_pos;
-        rep(i, zone_count) rep(j, pods[i][my_id])
-            pod_pos.push_back(i);
         {
-            vector<Move> moves = search_moves(my_id, pod_pos, owner, 5);
+
+            vector<Move> moves;
+            vector<int> pods_pos;
+            for (Land& land : lands)
+            {
+                if (!land.perfect(my_id, owner))
+                {
+                    vector<int> land_pods_pos = land.list_pods_pos(my_id, pods);
+                    pods_pos.insert(pods_pos.end(), all(land_pods_pos));
+//                     continue;
+//
+//                     int beam_width;
+//                     if (land.pos.size() < 10)
+//                         beam_width = 5;
+//                     else
+//                     {
+//                         if (land_pods_pos.size() < 5)
+//                             beam_width = 30;
+//                         else if (land_pods_pos.size() < 10)
+//                             beam_width = 15;
+//                         else
+//                             beam_width = 5;
+//                     }
+//
+//                     int search_turns = 5;
+//                     if (land_pods_pos.size() >= 10)
+//                         search_turns = 3;
+//
+//                     vector<Move> land_moves = search_moves(my_id, land_pods_pos, owner, search_turns, beam_width);
+//                     moves.insert(moves.end(), all(land_moves));
+                }
+            }
+
+            {
+                int beam_width = 30;
+                int search_turns = 5;
+                if (pods_pos.size() >= 20)
+                {
+                    beam_width = 2;
+                    search_turns = 1;
+                }
+                else if (pods_pos.size() >= 10)
+                {
+                    beam_width = 20;
+                    search_turns = 5;
+                }
+//                 else if (pods_pos.size() >= 5)
+//                 {
+//                 }
+
+                Timer timer;
+                timer.start();
+                moves = search_moves(my_id, pods_pos, owner, search_turns, beam_width);
+                fprintf(stderr, "%3d: %3d, %3d: %f\n", (int)pods_pos.size(), search_turns, beam_width, timer.get_elapsed());
+            }
+
             if (moves.empty())
                 cout << "WAIT" << endl;
             else
@@ -402,16 +527,65 @@ int main()
             const auto next_pods = pods;
             const auto is_all_own = all_own(my_id, owner);
 
+            vector<int> zones;
+            if (turn == 0)
+            {
+                vector<int> sum_plat_src(lands.size());
+                rep(land_i, lands.size())
+                {
+                    Land& land = lands[land_i];
+
+                    int sum = 0;
+                    for (int i : land.pos)
+                        sum += plat_src[i];
+                    sum_plat_src[land_i] = sum;
+                }
+                int max_land_i = max_element(all(sum_plat_src)) - sum_plat_src.begin();
+                zones = lands[max_land_i].pos;
+            }
+            else
+            {
+//                 rep(i, zone_count)
+//                     zones.push_back(i);
+                for (Land& land : lands)
+                {
+                    if (!land.perfect(my_id, owner))
+                    {
+                        vector<vector<int>> land_pods(player_count);
+                        rep(id, player_count)
+                            land_pods[id] = land.list_pods_pos(id, pods);
+
+                        vector<int> num_pods(player_count);
+                        rep(id, player_count)
+                            num_pods[id] = land_pods[id].size();
+
+                        int max_ene_num_pods = -1;
+                        rep(id, player_count)
+                            if (id != my_id)
+                                upmax(max_ene_num_pods, num_pods[id]);
+
+                        if (max_ene_num_pods + land.pos.size() / 2 >= num_pods[my_id])
+                        {
+                            auto p = land.can_buy_pos(my_id, owner);
+                            zones.insert(zones.end(), all(p));
+                        }
+                    }
+                }
+            }
+
             vector<tuple<int, int, int>> cand_pos;
-            rep(i, zone_count)
+            for (int i : zones)
             {
                 if (!is_all_own[i])
                 {
+                    tuple<int, int, int> add(-1, -1, -1);
+
                     if (owner[i] == NEAUTRAL)
                     {
-                        cand_pos.push_back(make_tuple(plat_src[i], i, turn == 0 ? 2 : 1));
+//                         cand_pos.push_back(make_tuple(plat_src[i], i, turn == 0 ? 2 : 1));
+                        add = make_tuple(plat_src[i], i, turn == 0 ? 2 : 1);
                         if (next_pods[i][my_id] > 0)
-                            get<0>(cand_pos.back()) -= 3;
+                            get<0>(add) -= 3;
                     }
                     else if (owner[i] == my_id)
                     {
@@ -422,34 +596,35 @@ int main()
                         if (around_ene > 0)
                         {
                             int need = around_ene;
-                            cand_pos.push_back(make_tuple(plat_src[i], i, need));
+//                             cand_pos.push_back(make_tuple(plat_src[i], i, need));
+                            add = make_tuple(plat_src[i], i, need);
                         }
+                    }
+
+                    if (get<0>(add) != -1)
+                    {
+                        for (int j : zone_link[i])
+                            if (owner[j] != NEAUTRAL && owner[j] != my_id)
+                                upmax(get<0>(add), plat_src[i]);
+
+                        cand_pos.push_back(add);
                     }
                 }
             }
             sort(rall(cand_pos));
             vector<pint> buy_commands;
             int rem = platinum;
-            for (auto& it : cand_pos)
+            while (rem > 0)
             {
-                if (rem == 0)
-                    break;
-                int num = min(rem, get<2>(it));
-                buy_commands.push_back(pint(num, get<1>(it)));
-                rem -= num;
+                for (auto& it : cand_pos)
+                {
+                    if (rem == 0)
+                        break;
+                    int num = min(rem, get<2>(it));
+                    buy_commands.push_back(pint(num, get<1>(it)));
+                    rem -= num;
+                }
             }
-
-//             srand(my_id * 1919810);
-//             vector<pint> buy_commands;
-//             while (buy_commands.size() < 1)
-//             {
-//                 int r = rand() % zone_count;
-//                 if (owner[r] == my_id || owner[r] == NEAUTRAL)
-//                     buy_commands.push_back(pint(1, r));
-//             }
-
-//             while (buy_commands.size() && buy_commands.size() + pod_pos.size() > 1)
-//                 buy_commands.pop_back();
 
             if (buy_commands.empty())
                 cout << "WAIT" << endl;
